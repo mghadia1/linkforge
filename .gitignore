@@ -1,0 +1,26 @@
+target/
+*.class
+# The Maven wrapper's properties file is committed; its downloaded jar is not.
+.mvn/wrapper/maven-wrapper.jar
+
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+.env.local
+
+.DS_Store
+.idea/
+*.iml
+.vscode/
+
+# OpenTofu / Terraform
+# .terraform.lock.hcl is deliberately NOT ignored: it pins provider versions and checksums, so
+# committing it is what makes an apply reproducible.
+.terraform/
+*.tfstate
+*.tfstate.*
+# tfvars hold the alert email and would hold any secret passed by variable.
+*.tfvars
+*.tfvars.json
+crash.log

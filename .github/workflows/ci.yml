@@ -1,0 +1,163 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+# Read-only. Nothing in this workflow publishes, comments, or pushes, so it should not hold a
+# token that could.
+permissions:
+  contents: read
+
+# A newer push to the same branch makes an in-flight run obsolete. Pull requests are excluded from
+# cancellation by keying on the ref, so a queued PR run is not cancelled by a push to a branch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    name: API — tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          # Caches ~/.m2 keyed on the POM, so a run that changes no dependency skips the download.
+          cache: maven
+          cache-dependency-path: api/pom.xml
+
+      # The integration tests start real Postgres and Redis containers through Testcontainers.
+      # docker-java negotiates API 1.32 by default, which any daemon with a higher MinAPIVersion
+      # rejects as a bare HTTP 400 — surfaced only as "Could not find a valid Docker environment".
+      # Asking the runner's own daemon what it speaks avoids guessing, and avoids this breaking
+      # silently the next time GitHub upgrades the runner image.
+      - name: Match the runner's Docker API version
+        run: |
+          echo "DOCKER_API=$(docker version --format '{{.Server.APIVersion}}')" >> "$GITHUB_ENV"
+          docker version --format 'daemon API {{.Server.APIVersion}} (min {{.Server.MinAPIVersion}})'
+
+      - name: Test
+        working-directory: api
+        run: ./mvnw -B --no-transfer-progress test -Ddocker.api.version="$DOCKER_API"
+
+      # Surefire's XML is the only record of which test failed once the log has scrolled past.
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-surefire-reports
+          path: api/target/surefire-reports/
+          retention-days: 7
+
+  web:
+    name: Web — typecheck, tests, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # ci, not install: it installs exactly the lockfile and fails if package.json has drifted
+      # from it, which is the behaviour you want in CI and not the one you want at a desk.
+      - name: Install
+        run: npm ci
+
+      # Typechecking is a separate step from the build so a type error reads as a type error.
+      - name: Typecheck
+        run: npx tsc -b
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+
+  stack:
+    name: Stack — end to end
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Only worth standing the stack up for code that already passes its own tests.
+    needs: [api, web]
+    steps:
+      - uses: actions/checkout@v4
+
+      # This job also covers "do the Dockerfiles build", so there is no separate image-build job:
+      # compose builds both images here, and a broken Dockerfile fails this step.
+      #
+      # Unit and integration tests pass with the app wired up by Spring's test context. They do
+      # not prove the composed stack boots: a wrong environment variable, a bad nginx proxy rule
+      # or a container that cannot reach Postgres all pass every test and still ship broken.
+      - name: Start the stack
+        run: docker compose up -d --build
+
+      - name: Wait for the API
+        run: |
+          for _ in $(seq 1 60); do
+            if curl -sf http://localhost:8080/actuator/health > /dev/null; then
+              echo "api healthy"; exit 0
+            fi
+            sleep 2
+          done
+          echo "api never became healthy"; docker compose logs api; exit 1
+
+      - name: Register, shorten, redirect, and read the stats back
+        run: |
+          set -euo pipefail
+          token=$(curl -sf -X POST http://localhost:8080/api/auth/register \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"ci@example.com","password":"correct horse battery"}' \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin)["token"])')
+
+          code=$(curl -sf -X POST http://localhost:8080/api/links \
+            -H 'Content-Type: application/json' -H "Authorization: Bearer $token" \
+            -d '{"url":"https://example.com/ci"}' \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin)["code"])')
+
+          location=$(curl -s -o /dev/null -w '%{redirect_url}' "http://localhost:8080/$code")
+          test "$location" = "https://example.com/ci" \
+            || { echo "redirected to '$location'"; exit 1; }
+
+          # Clicks are written off the request thread, so the count is not readable instantly.
+          for _ in $(seq 1 20); do
+            total=$(curl -sf -H "Authorization: Bearer $token" \
+              "http://localhost:8080/api/links/$code/stats?days=7" \
+              | python3 -c 'import sys,json; print(json.load(sys.stdin)["totalClicks"])')
+            [ "$total" = "1" ] && { echo "click recorded"; break; }
+            sleep 1
+          done
+          test "$total" = "1" || { echo "click never recorded (total=$total)"; exit 1; }
+
+      - name: Check the frontend is served and proxies the API
+        run: |
+          set -euo pipefail
+          curl -sf http://localhost:3000/ | grep -q '<div id="root">'
+          # An unknown path must fall through to the SPA, not 404.
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/any/route)" = "200"
+          # And /api must reach the API container through nginx, same origin.
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+            http://localhost:3000/api/auth/login -H 'Content-Type: application/json' \
+            -d '{"email":"ci@example.com","password":"correct horse battery"}')" = "200"
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose logs
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

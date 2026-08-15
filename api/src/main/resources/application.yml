@@ -1,0 +1,70 @@
+spring:
+  application:
+    name: linkforge-api
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/linkforge}
+    username: ${DB_USER:linkforge}
+    password: ${DB_PASSWORD:linkforge}
+  jpa:
+    hibernate:
+      # Flyway owns the schema. Hibernate must never modify it.
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      # The redirect must never sit waiting on a cache. If Redis does not answer quickly, the
+      # request gives up on it and reads Postgres instead.
+      timeout: 200ms
+      connect-timeout: 500ms
+
+linkforge:
+  # Base used to build the short URL returned by POST /api/links.
+  # Render supplies its public URL automatically; LINKFORGE_BASE_URL still overrides it anywhere.
+  base-url: ${LINKFORGE_BASE_URL:${RENDER_EXTERNAL_URL:http://localhost:8080}}
+  cache:
+    enabled: ${LINKFORGE_CACHE_ENABLED:true}
+    ttl: 1h
+    miss-ttl: 30s
+  clicks:
+    # Off isolates the redirect read path for the latency benchmark, and sheds analytics entirely
+    # if writes ever threaten redirects in production.
+    enabled: ${LINKFORGE_CLICKS_ENABLED:true}
+  auth:
+    # No default. Unset, a random key is generated at startup and every restart invalidates
+    # existing tokens — deliberately inconvenient, because a signing key committed to source is a
+    # signing key shared by every deployment and readable by anyone with the repository.
+    secret: ${LINKFORGE_JWT_SECRET:}
+    issuer: linkforge
+    ttl: 1h
+
+management:
+  health:
+    # A free hosted deployment deliberately runs without Redis. Keep its separate actuator
+    # indicator aligned with the cache flag so the health check reflects required dependencies.
+    redis:
+      enabled: ${LINKFORGE_CACHE_ENABLED:true}
+  endpoints:
+    web:
+      exposure:
+        # metrics is exposed so the dropped-click counters are observable; without it, shed
+        # analytics would be invisible. Both endpoints are unauthenticated and must be put behind
+        # auth or kept off the public listener before this is deployed.
+        include: health,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+server:
+  port: ${PORT:8080}
+  forward-headers-strategy: framework
+  error:
+    include-message: always
+
+logging:
+  level:
+    org.flywaydb: INFO

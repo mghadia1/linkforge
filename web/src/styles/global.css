@@ -1,0 +1,360 @@
+/*
+ * LinkForge — instrument panel.
+ *
+ * A forge: char-black metal, ember heat, hairline engineering rules. Everything numeric is set in
+ * a monospace so columns of codes and counts line up and stay scannable; everything editorial is
+ * set in Bricolage Grotesque, whose slight irregularity keeps the panel from feeling like a
+ * default admin template.
+ */
+
+:root {
+  /* Char — the cooled metal the panel is cut from. */
+  --char-900: #0b0908;
+  --char-850: #100d0b;
+  --char-800: #16120f;
+  --char-700: #1d1815;
+  --char-600: #272019;
+  --char-500: #362c24;
+
+  /* Ember — heat. Used sparingly so it always means "this matters". */
+  --ember-400: #ff8a3d;
+  --ember-500: #ff6b1a;
+  --ember-600: #e0530a;
+  --ember-glow: rgba(255, 107, 26, 0.16);
+
+  /* Quench — the cool counterpoint, for the second data series and links. */
+  --quench-400: #5ec8d8;
+  --quench-500: #34a9bd;
+
+  --ash-100: #f7f2ec;
+  --ash-300: #cfc3b6;
+  --ash-500: #9a8b7d;
+  --ash-600: #6f6358;
+
+  --danger: #ff5f56;
+  --success: #7dd88a;
+
+  --rule: rgba(255, 233, 214, 0.09);
+  --rule-strong: rgba(255, 233, 214, 0.16);
+
+  --font-display: 'Bricolage Grotesque Variable', ui-sans-serif, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  /* Sharp, not rounded. This is machined, not moulded. */
+  --radius: 2px;
+  --shell: 1180px;
+
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+* {
+  margin: 0;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  min-height: 100vh;
+  background-color: var(--char-900);
+  color: var(--ash-100);
+  font-family: var(--font-display);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/*
+ * Atmosphere: a faint engineering grid, a warm ember bloom bleeding in from the top-left as if
+ * something off-canvas is hot, and a grain overlay so the flat blacks are not dead flat.
+ */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(900px 520px at 8% -10%, rgba(255, 107, 26, 0.13), transparent 70%),
+    radial-gradient(700px 460px at 100% 0%, rgba(52, 169, 189, 0.07), transparent 65%),
+    linear-gradient(var(--rule) 1px, transparent 1px),
+    linear-gradient(90deg, var(--rule) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 64px 64px, 64px 64px;
+  opacity: 0.85;
+}
+
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.035;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+#root {
+  position: relative;
+  z-index: 2;
+}
+
+h1,
+h2,
+h3 {
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  text-wrap: balance;
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+a {
+  color: var(--quench-400);
+  text-underline-offset: 3px;
+}
+
+/* Focus is never removed, only restyled — keyboard users need to see where they are. */
+:focus-visible {
+  outline: 2px solid var(--ember-500);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--ember-500);
+  color: var(--char-900);
+}
+
+/* ---------- primitives ---------- */
+
+.mono {
+  font-family: var(--font-mono);
+  font-feature-settings: 'zero' 1;
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ash-500);
+}
+
+.panel {
+  position: relative;
+  background: linear-gradient(180deg, var(--char-800), var(--char-850));
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+
+/* Corner ticks — the drawn-on registration marks of a technical panel. */
+.panel--ticked::before,
+.panel--ticked::after {
+  content: '';
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-color: var(--rule-strong);
+  border-style: solid;
+}
+
+.panel--ticked::before {
+  top: -1px;
+  left: -1px;
+  border-width: 1px 0 0 1px;
+  border-color: var(--ember-500);
+}
+
+.panel--ticked::after {
+  bottom: -1px;
+  right: -1px;
+  border-width: 0 1px 1px 0;
+  border-color: var(--ember-500);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px 18px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--char-700);
+  color: var(--ash-100);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.18s var(--ease), border-color 0.18s var(--ease),
+    transform 0.18s var(--ease), color 0.18s var(--ease);
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--char-600);
+  border-color: var(--ash-600);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn--hot {
+  background: var(--ember-500);
+  border-color: var(--ember-400);
+  color: #22140a;
+  font-weight: 600;
+  box-shadow: 0 0 0 0 var(--ember-glow);
+}
+
+.btn--hot:hover:not(:disabled) {
+  background: var(--ember-400);
+  border-color: var(--ember-400);
+  color: #22140a;
+  box-shadow: 0 0 26px -4px var(--ember-glow);
+}
+
+.btn--ghost {
+  background: transparent;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.field > label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ash-500);
+}
+
+.input {
+  width: 100%;
+  padding: 12px 14px;
+  background: var(--char-900);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  color: var(--ash-100);
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  transition: border-color 0.18s var(--ease), background 0.18s var(--ease);
+}
+
+.input::placeholder {
+  color: var(--ash-600);
+}
+
+.input:hover {
+  border-color: var(--ash-600);
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--ember-500);
+  background: #0d0a08;
+}
+
+.notice {
+  padding: 10px 13px;
+  border-radius: var(--radius);
+  border: 1px solid;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+.notice--error {
+  border-color: rgba(255, 95, 86, 0.4);
+  background: rgba(255, 95, 86, 0.09);
+  color: #ffb3ae;
+}
+
+/* ---------- motion ---------- */
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes spark {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 107, 26, 0.55);
+  }
+  100% {
+    box-shadow: 0 0 0 22px rgba(255, 107, 26, 0);
+  }
+}
+
+@keyframes sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(320%);
+  }
+}
+
+.rise {
+  animation: rise 0.6s var(--ease) both;
+}
+
+/* One orchestrated page-load reveal, rather than motion scattered everywhere. */
+.stagger > * {
+  animation: rise 0.55s var(--ease) both;
+}
+.stagger > *:nth-child(1) { animation-delay: 0.04s; }
+.stagger > *:nth-child(2) { animation-delay: 0.10s; }
+.stagger > *:nth-child(3) { animation-delay: 0.16s; }
+.stagger > *:nth-child(4) { animation-delay: 0.22s; }
+.stagger > *:nth-child(5) { animation-delay: 0.28s; }
+.stagger > *:nth-child(6) { animation-delay: 0.34s; }
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

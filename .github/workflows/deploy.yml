@@ -1,0 +1,144 @@
+name: Deploy
+
+# Manual only, on purpose. This workflow spends money and rolls a running service, and the usual
+# "deploy every push to main" default is wrong for a portfolio stack that is expected to be torn
+# down between demos. To make it continuous, add:
+#   push:
+#     branches: [main]
+# and be sure the budget alarm in infra/budget.tf is live first.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment suffix used by the Terraform stack
+        required: true
+        default: dev
+
+permissions:
+  # Required to request the OIDC token. There is no AWS access key in this repository's secrets:
+  # a long-lived key in CI never expires, leaks through logs, and is copied into every fork.
+  id-token: write
+  contents: read
+
+# Never let two deploys roll the same service at once.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  deploy:
+    name: Build, push, and roll
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assume the deploy role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # Tagged with the commit SHA, not "latest": a deploy has to name a specific build, and
+      # "latest" makes it impossible to tell what is running or to roll back to what was.
+      - name: Build and push the API image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          REPOSITORY: linkforge-${{ inputs.environment }}-api
+        run: |
+          set -euo pipefail
+          image="$REGISTRY/$REPOSITORY:${{ github.sha }}"
+          # linux/amd64 must match runtime_platform in infra/ecs.tf.
+          docker build --platform linux/amd64 -t "$image" ./api
+          docker push "$image"
+          echo "IMAGE=$image" >> "$GITHUB_ENV"
+
+      - name: Register a new task definition revision
+        id: taskdef
+        env:
+          FAMILY: linkforge-${{ inputs.environment }}-api
+        run: |
+          set -euo pipefail
+          # Take the running definition and change only the image, so nothing else drifts.
+          aws ecs describe-task-definition --task-definition "$FAMILY" \
+            --query 'taskDefinition' > current.json
+          python3 - <<'PY'
+          import json
+          with open('current.json') as f:
+              task = json.load(f)
+          import os
+          task['containerDefinitions'][0]['image'] = os.environ['IMAGE']
+          for key in ('taskDefinitionArn', 'revision', 'status', 'requiresAttributes',
+                      'compatibilities', 'registeredAt', 'registeredBy', 'deregisteredAt'):
+              task.pop(key, None)
+          with open('next.json', 'w') as f:
+              json.dump(task, f)
+          PY
+          arn=$(aws ecs register-task-definition --cli-input-json file://next.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "arn=$arn" >> "$GITHUB_OUTPUT"
+
+      - name: Roll the service and wait for it to settle
+        env:
+          CLUSTER: linkforge-${{ inputs.environment }}
+          SERVICE: linkforge-${{ inputs.environment }}-api
+        run: |
+          set -euo pipefail
+          aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" \
+            --task-definition "${{ steps.taskdef.outputs.arn }}" > /dev/null
+          # Fails the job if the new tasks never reach a steady state, rather than reporting
+          # success while ECS quietly rolls back.
+          aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build the frontend
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Publish the frontend
+        env:
+          BUCKET: ${{ vars.AWS_WEB_BUCKET }}
+        run: |
+          set -euo pipefail
+          # Hashed assets first, cached hard. If index.html went first it would briefly reference
+          # assets that were not uploaded yet.
+          aws s3 sync web/dist "s3://$BUCKET" --delete \
+            --exclude index.html --cache-control 'public,max-age=31536000,immutable'
+          # index.html last, never cached, so a deploy is picked up immediately.
+          aws s3 cp web/dist/index.html "s3://$BUCKET/index.html" \
+            --cache-control 'no-cache'
+
+      - name: Invalidate the CDN
+        env:
+          DISTRIBUTION: ${{ vars.AWS_CLOUDFRONT_DISTRIBUTION }}
+        run: |
+          aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION" \
+            --paths '/index.html' > /dev/null
+
+      - name: Smoke test the deployment
+        env:
+          APP_URL: ${{ vars.AWS_APP_URL }}
+        run: |
+          set -euo pipefail
+          # A deploy that leaves the service unable to answer is a failed deploy, not a green one.
+          for _ in $(seq 1 30); do
+            if curl -sf "$APP_URL/actuator/health" | grep -q UP; then
+              echo "healthy"; exit 0
+            fi
+            sleep 5
+          done
+          echo "the deployment never answered a health check"; exit 1
