@@ -1,7 +1,8 @@
 # LinkForge
 
 A URL shortener with click analytics: a Spring Boot API over PostgreSQL and Redis with JWT auth,
-and a React/TypeScript dashboard. CI and an AWS deployment are the remaining steps in
+and a React/TypeScript dashboard. The application is live on a free Render web service backed by
+Neon PostgreSQL; the larger AWS architecture remains an undeployed design in
 [`PROJECT_SPEC.md`](PROJECT_SPEC.md).
 
 > **`resume_eligible: no`.** Nothing here goes on a resume, the portfolio site, or an application
@@ -17,9 +18,20 @@ and a React/TypeScript dashboard. CI and an AWS deployment are the remaining ste
 | 3 | Auth (users, JWT, per-user links) | **Done** |
 | 4 | Redis cache for `code -> URL` | **Done**; latency measurement inconclusive |
 | 5 | React + TypeScript frontend | **Done** |
-| 6 | Dockerize + CI | **Done locally**; never run on GitHub yet |
+| 6 | Dockerize + CI | **Done**; GitHub Actions passing |
 | 7 | AWS deployment | **Written and validated, never deployed** |
 | 8 | Hardening (rate limits, SSRF, load numbers) | Scheme allowlist only |
+
+## Live deployment
+
+**LinkForge is live at <https://linkforge-cxfk.onrender.com>.** Render builds the root Dockerfile,
+which packages the React dashboard inside the Spring Boot application so the UI and API share one
+origin. Neon provides the persistent PostgreSQL database. The hosted free tier runs without Redis;
+local Docker Compose retains Redis for cache behavior and benchmarking.
+
+The Render service sleeps after 15 minutes without traffic, so the first request after an idle
+period can take about a minute. The deployment was smoke-tested through registration, URL creation,
+redirect, and database persistence on August 15, 2026.
 
 ## The cache result: inconclusive, and that is the honest answer
 
@@ -144,8 +156,9 @@ curl -s http://localhost:8080/actuator/metrics/linkforge.clicks.rejected
 Postgres, ElastiCache Redis, S3 + CloudFront, Secrets Manager, a GitHub OIDC deploy role, and a
 budget alarm — plus [`infra/README.md`](infra/README.md), which is the runbook.
 
-> **Nothing has been deployed. There is no live URL.** No AWS account was involved: the config is
-> written, `tofu fmt` clean, schema-validated against the AWS provider, and graph-checked for
+> **Nothing in this AWS directory has been deployed.** The live application uses Render and Neon;
+> no AWS account was involved. The config is written, `tofu fmt` clean, schema-validated against
+> the AWS provider, and graph-checked for
 > cycles. That catches wrong attribute names and missing arguments; it does not catch what only a
 > real `apply` will. Until it runs, **"deployed on AWS" cannot go on a resume** — the services are
 > a design, not an achievement.
@@ -175,7 +188,7 @@ for stability, publishes the frontend, invalidates the CDN, and smoke-tests the 
 | Job | What it proves |
 |---|---|
 | `api` | All 97 backend tests, against real Postgres and Redis via Testcontainers. |
-| `web` | `npm ci`, typecheck, 15 frontend tests, production build. |
+| `web` | `npm ci`, typecheck, 18 frontend tests, production build. |
 | `stack` | `docker compose up` boots, then register → shorten → redirect → stats round-trips, and nginx serves the SPA and proxies `/api`. |
 
 `stack` exists because the other two cannot fail on the things that actually break a deployment. A
@@ -183,11 +196,8 @@ wrong environment variable, a bad nginx proxy rule, or a container that cannot r
 passes every unit and integration test and still ships broken. It also covers "do the Dockerfiles
 build", so there is no separate image job.
 
-> **This workflow has never run on GitHub.** Every step in it was executed locally, verbatim, and
-> passes — but there is no green badge, because nothing here has been pushed. The layout assumes
-> `linkforge-fullstack/` becomes its own repository, matching the other seven projects; if it is
-> instead committed inside the portfolio repo, the file has to move to that repo's root
-> `.github/workflows/` and every path in it needs a `projects/linkforge-fullstack/` prefix.
+The workflow first passed on GitHub on August 15, 2026. The repository is standalone, so workflow
+paths are rooted exactly where the local commands expect them.
 
 ### The Docker API version, again
 
