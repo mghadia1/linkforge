@@ -60,7 +60,7 @@ would require: [`bench/RESULTS.md`](bench/RESULTS.md).
 docker compose up --build
 ```
 
-**The app is at <http://localhost:3000>.** Postgres on 5432, Redis on 6379, the API on 8080.
+**The app is at <http://localhost:3000>.** Postgres on 5432 and Redis on 6379 (on localhost only), the API on 8080.
 Flyway creates the schema on first boot.
 
 nginx serves the built frontend and proxies `/api` to the API container, so the browser only ever
